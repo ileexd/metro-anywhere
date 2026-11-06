@@ -16,32 +16,32 @@
 <aside id="panel" aria-label="Controls">
   <header class="board">
     <h1>Metro Anywhere</h1>
-    <button id="collapse" class="ghost" aria-expanded="true" aria-controls="panel-body" type="button">Hide</button>
+    <div class="board-btns"><button id="ui-lang" class="ghost" type="button" lang="zh-Hant">繁中</button><button id="collapse" class="ghost" aria-expanded="true" aria-controls="panel-body" type="button">Hide</button></div>
   </header>
   <div id="panel-body">
     <section class="row">
-      <label class="lab" for="sys-search">System</label>
+      <label class="lab" for="sys-search" data-i18n="system">System</label>
       <div class="combo">
-        <input id="sys-search" type="search" placeholder="Search a city or country" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="sys-list">
+        <input id="sys-search" type="search" data-i18n-ph="systemPh" placeholder="Search a city or country" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="sys-list">
         <ul id="sys-list" role="listbox" hidden></ul>
       </div>
       <p id="sys-sub" class="sub"></p>
     </section>
 
     <section class="row">
-      <label class="lab" for="place-search">Drop it on</label>
+      <label class="lab" for="place-search" data-i18n="dropOn">Drop it on</label>
       <div class="combo">
-        <input id="place-search" type="search" placeholder="Search a place" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="place-list">
+        <input id="place-search" type="search" data-i18n-ph="placePh" placeholder="Search a place" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="place-list">
         <ul id="place-list" role="listbox" hidden></ul>
       </div>
-      <p class="sub">Or drag the lines or the yellow handle on the map.</p>
+      <p class="sub" data-i18n="dragHint">Or drag the lines or the yellow handle on the map.</p>
     </section>
 
     <section class="row">
-      <span class="lab" id="lang-lab">Station names</span>
+      <span class="lab" id="lang-lab" data-i18n="stationNames">Station names</span>
       <div class="seg" role="group" aria-labelledby="lang-lab">
-        <button id="lang-local" type="button" aria-pressed="true">Local</button>
-        <button id="lang-en" type="button" aria-pressed="false">English</button>
+        <button id="lang-local" type="button" aria-pressed="true" data-i18n="local">Local</button>
+        <button id="lang-en" type="button" aria-pressed="false" data-i18n="english">English</button>
       </div>
     </section>
 
@@ -53,46 +53,52 @@
 
     <section class="row two">
       <div>
-        <label class="lab" for="rot">Rotation</label>
+        <label class="lab" for="rot" data-i18n="rotation">Rotation</label>
         <div class="inline"><input id="rot" type="range" min="0" max="359" step="1" value="0"><input id="rot-n" type="number" min="0" max="359" step="1" value="0" aria-label="Rotation in degrees"><span class="unit">°</span></div>
       </div>
       <div>
-        <label class="lab" for="opa">Opacity</label>
+        <label class="lab" for="opa" data-i18n="opacity">Opacity</label>
         <div class="inline"><input id="opa" type="range" min="15" max="100" step="5" value="100"></div>
       </div>
     </section>
 
     <section class="row">
-      <label class="lab" for="style-sel">Naming style</label>
+      <span class="lab" data-i18n="rotCenter">Rotation center</span>
+      <div class="inline2"><button id="piv-set" type="button" aria-pressed="false">Set center</button><button id="piv-reset" type="button" class="ghost" data-i18n="reset" disabled>Reset</button></div>
+      <p id="piv-note" class="sub" aria-live="polite"></p>
+    </section>
+
+    <section class="row">
+      <label class="lab" for="style-sel" data-i18n="namingStyle">Naming style</label>
       <select id="style-sel"></select>
       <p id="style-note" class="sub"></p>
     </section>
 
     <section class="row">
-      <span class="lab">Layers</span>
+      <span class="lab" data-i18n="layers">Layers</span>
       <div id="layers"></div>
     </section>
 
     <section class="row actions">
-      <button id="copy" type="button">Copy link</button>
-      <button id="png" type="button">Save PNG</button>
-      <button id="qa-open" type="button">Data QA</button>
-      <button id="theme" type="button" aria-label="Switch map theme">Dark map</button>
+      <button id="copy" type="button" data-i18n="copy">Copy link</button>
+      <button id="png" type="button" data-i18n="png">Save PNG</button>
+      <button id="qa-open" type="button" data-i18n="qa">Data QA</button>
+      <button id="theme" type="button" data-i18n-aria="mapTheme" aria-label="Switch map theme">Dark map</button>
     </section>
-    <p class="fine">Data <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>. Map tiles by <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> and <a href="https://openmaptiles.org" target="_blank" rel="noopener">OpenMapTiles</a>. Names are generated for fun and are not real stations.</p>
+    <p class="fine" data-i18n-html="fine">Data <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>. Map tiles by <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> and <a href="https://openmaptiles.org" target="_blank" rel="noopener">OpenMapTiles</a>. Names are generated for fun and are not real stations.</p>
   </div>
 </aside>
 
 <div id="card" class="card" hidden role="dialog" aria-labelledby="card-title">
-  <button id="card-x" class="ghost x" type="button" aria-label="Close">×</button>
+  <button id="card-x" class="ghost x" type="button" data-i18n-aria="close" aria-label="Close">×</button>
   <h2 id="card-title"></h2>
   <p id="card-alt" class="alt"></p>
   <div id="card-lines" class="bullets"></div>
   <dl id="card-why"></dl>
   <form id="card-form">
-    <label class="lab" for="rn-local">Rename (local)</label><input id="rn-local" type="text">
-    <label class="lab" for="rn-en">Rename (English)</label><input id="rn-en" type="text">
-    <div class="inline2"><button type="submit">Save</button><button id="rn-reset" type="button" class="ghost">Reset</button></div>
+    <label class="lab" for="rn-local" data-i18n="renameLocal">Rename (local)</label><input id="rn-local" type="text">
+    <label class="lab" for="rn-en" data-i18n="renameEn">Rename (English)</label><input id="rn-en" type="text">
+    <div class="inline2"><button type="submit" data-i18n="save">Save</button><button id="rn-reset" type="button" class="ghost" data-i18n="reset">Reset</button></div>
   </form>
 </div>
 
@@ -100,15 +106,16 @@
 
 <dialog id="qa">
   <div class="qa-head">
-    <h2>Data QA</h2>
+    <h2 data-i18n="qa">Data QA</h2>
     <p id="qa-sum" class="sub"></p>
-    <div class="inline2"><button id="qa-run" type="button">Run all</button><button id="qa-x" type="button" class="ghost">Close</button></div>
+    <div class="inline2"><button id="qa-run" type="button" data-i18n="runAll">Run all</button><button id="qa-x" type="button" class="ghost" data-i18n="close">Close</button></div>
   </div>
-  <div class="qa-wrap"><table id="qa-table"><thead><tr><th>System</th><th>Result</th><th>Stations</th><th>Lines</th><th>Notes</th></tr></thead><tbody></tbody></table></div>
+  <div class="qa-wrap"><table id="qa-table"><thead><tr><th data-i18n="system">System</th><th data-i18n="result">Result</th><th data-i18n="stations">Stations</th><th data-i18n="lines">Lines</th><th data-i18n="notes">Notes</th></tr></thead><tbody></tbody></table></div>
 </dialog>
 
 <script src="vendor/maplibre-gl.js"></script>
 <script src="vendor/pinyin-pro.js"></script>
+<script src="js/i18n.js"></script>
 <script src="js/geo.js"></script>
 <script src="js/mvt.js"></script>
 <script src="js/translit.js"></script>

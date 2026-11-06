@@ -3,8 +3,8 @@
   --board: #f6f8fb; --ink: #10182b; --muted: #55607a; --rule: #d4dae6; --field: #ffffff;
   --edge: #ffc800; --edge-ink: #1a1400; --sign: #14306b; --sign-ink: #ffffff;
   --ok: #18794e; --warn: #a15c00; --bad: #c0271d;
-  --display: "Barlow Condensed", "Arial Narrow", "Noto Sans CJK TC", sans-serif;
-  --body: "Overpass", "Helvetica Neue", Arial, "Noto Sans CJK TC", sans-serif;
+  --display: "Barlow Condensed", "Arial Narrow", "Noto Sans CJK TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  --body: "Overpass", "Helvetica Neue", Arial, "Noto Sans CJK TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
   --mono: "Overpass Mono", ui-monospace, Menlo, monospace;
   color-scheme: light;
 }
@@ -26,6 +26,7 @@ a { color: inherit; }
 .board { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--sign); color: var(--sign-ink); padding: 8px 12px; border-bottom: 5px solid var(--edge); }
 .board h1 { margin: 0; font: 700 30px/1 var(--display); letter-spacing: .01em; }
 .board .ghost { color: var(--sign-ink); border-color: rgb(255 255 255 / .4); }
+.board-btns { display: flex; gap: 6px; flex: none; }
 #panel-body { overflow-y: auto; display: flex; flex-direction: column; min-height: 0; }
 #panel.closed #panel-body { display: none; }
 .row { padding: 10px 12px; border-bottom: 1px solid var(--rule); display: flex; flex-direction: column; gap: 5px; }
@@ -101,6 +102,9 @@ td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space
 .warn-chip { color: var(--warn); font-weight: 600; }
 
 .handle { width: 26px; height: 26px; border-radius: 50%; background: var(--edge); border: 3px solid #1a1400; cursor: grab; box-shadow: 0 2px 6px rgb(0 0 0 / .4); }
+.handle.piv { width: 24px; height: 24px; background: linear-gradient(#1a1400, #1a1400) center / 2px 100% no-repeat, linear-gradient(#1a1400, #1a1400) center / 100% 2px no-repeat, #fff; }
+#map.pivot-arm .maplibregl-canvas { cursor: crosshair !important; }
+#piv-set[aria-pressed=true] { background: var(--edge); color: var(--edge-ink); }
 .handle.rot { width: 22px; height: 22px; background: #fff; display: grid; place-items: center; font: 700 14px/1 var(--mono); color: #1a1400; }
 .maplibregl-ctrl-attrib { font-size: 11px; }
 

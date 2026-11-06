@@ -2,20 +2,22 @@
 (function () {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
+  var t = I18N.t;
   var TILEJSON = 'https://tiles.openfreemap.org/planet';
   var STYLE = { light: 'https://tiles.openfreemap.org/styles/positron', dark: 'https://tiles.openfreemap.org/styles/dark' };
   var catalog = window.MA_CATALOG;
   var systems = {}, pending = {};
   window.MA = { sys: function (s) { systems[s.id] = s; if (pending[s.id]) pending[s.id](s); } };
 
-  var S = { id: 'tokyo', target: [121.5305, 25.0375], rot: 0, opacity: 100, lang: 'local', style: 'auto', off: {}, netOff: {}, netOn: {}, renames: {}, zoom: null, theme: null };
-  var map, sys, plane = null, tileCache = new Map(), tileBase = null, runId = 0, names = {}, selected = null, handles = {}, styleReady = false, cc = null, ccFor = null;
+  var S = { id: 'tokyo', target: [121.5305, 25.0375], rot: 0, piv: [0, 0], opacity: 100, lang: 'local', style: 'auto', off: {}, netOff: {}, netOn: {}, renames: {}, zoom: null, theme: null };
+  var map, sys, plane = null, tileCache = new Map(), tileBase = null, runId = 0, names = {}, selected = null, handles = {}, styleReady = false, cc = null, ccFor = null, pivArm = false, restatus = null;
 
   function toast(m) { var t = $('toast'); t.textContent = m; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(function () { t.hidden = true; }, 3500); }
 
   /* ---------- share link ---------- */
   function encodeState() {
     var o = { s: S.id, t: S.target.map(function (v) { return +v.toFixed(4); }), r: S.rot, l: S.lang === 'en' ? 1 : 0, o: S.opacity };
+    if (pivOn()) o.p = S.piv.map(Math.round);
     if (S.style !== 'auto') o.y = S.style;
     if (map) o.z = +map.getZoom().toFixed(2);
     if (Object.keys(S.off).length) o.x = Object.keys(S.off);
@@ -30,6 +32,7 @@
       if (o.s && catalog.systems.some(function (c) { return c.id === o.s; })) S.id = o.s;
       if (o.t) S.target = o.t;
       if (typeof o.r === 'number') S.rot = o.r;
+      if (Array.isArray(o.p) && o.p.length === 2) S.piv = o.p;
       S.lang = o.l ? 'en' : 'local';
       if (o.o) S.opacity = o.o;
       if (o.y) S.style = o.y;
@@ -50,7 +53,7 @@
       pending[id] = ok;
       var el = document.createElement('script');
       el.src = 'data/' + id + '.js';
-      el.onerror = function () { no(new Error('Could not load data for ' + id)); };
+      el.onerror = function () { no(new Error(t('loadFail', { id: id }))); };
       document.head.appendChild(el);
     });
   }
@@ -93,6 +96,14 @@
     return out;
   }
   function placePt(xy) { return Geo.inverse(S.target, Geo.rotate(xy, S.rot)); }
+  // S.piv is the rotation center in the system's own metres, so it travels with the system. [0, 0] is the system center.
+  function pivOn() { return !!(S.piv[0] || S.piv[1]); }
+  // Where the system center must sit so the rotation center stays on map point p at this rotation.
+  function targetFor(p, rot) {
+    var q = Geo.rotate(S.piv, rot), c = Geo.inverse(p, [-q[0], -q[1]]);
+    for (var i = 0; i < 4; i++) { var e = Geo.forward(p, Geo.inverse(c, q)); c = Geo.inverse(c, [-e[0], -e[1]]); }
+    return c;
+  }
   function lineFeatures(coarse) {
     var fs = [], src = coarse ? plane.coarse : plane.lines;
     visibleLines().forEach(function (l) {
@@ -136,7 +147,7 @@
       'symbol-sort-key': ['-', 1, ['get', 'x']], 'text-padding': 3 },
       paint: { 'text-color': '#10182b', 'text-halo-color': '#ffffff', 'text-halo-width': 1.6 } });
     ['ma-st', 'ma-hit'].forEach(function (id) {
-      map.on('click', id, function (e) { if (dragging.moved) return; if (id === 'ma-st' && e.features[0]) { openCard(e.features[0].properties.i); e.originalEvent.stopPropagation(); } });
+      map.on('click', id, function (e) { if (dragging.moved || pivArm) return; if (id === 'ma-st' && e.features[0]) { openCard(e.features[0].properties.i); e.originalEvent.stopPropagation(); } });
       map.on('mouseenter', id, function () { map.getCanvas().style.cursor = id === 'ma-st' ? 'pointer' : 'move'; });
       map.on('mouseleave', id, function () { map.getCanvas().style.cursor = ''; });
     });
@@ -165,7 +176,9 @@
   function placeHandles() {
     if (!handles.center) return;
     handles.center.setLngLat(S.target);
-    handles.rot.setLngLat(placePt([0, plane.radius * .6]));
+    handles.rot.setLngLat(placePt([S.piv[0], S.piv[1] + plane.radius * .6]));
+    handles.piv.setLngLat(placePt(S.piv));
+    handles.piv.getElement().style.display = pivOn() ? '' : 'none';
   }
 
   /* ---------- naming ---------- */
@@ -220,7 +233,7 @@
     var st = list.map(function (v) { var p = placePt(plane.st[v.i]); return { id: v.i, p: p, host: hostFor(p) }; });
     var bar = $('prog-bar'), prog = $('prog');
     prog.hidden = false; bar.style.width = '4%';
-    $('status-text').textContent = 'Naming ' + st.length + ' stations…';
+    status(function () { $('status-text').textContent = t('namingN', { n: st.length }); });
     $('tiers').innerHTML = '';
     countryLang().then(function (code) {
       if (id !== runId) return null;
@@ -231,49 +244,49 @@
       return Naming.run({
         stations: st, lang: lang, cache: tileCache, fetchTile: fetchTile, general: Profiles.general,
         getProfile: function (h) { return Profiles.byId[h] || null; }, getBudget: function (h) { return catalog.budget && catalog.budget[h]; }, isCancelled: function () { return id !== runId; },
-        onProgress: function (p) { if (id !== runId) return; bar.style.width = Math.round(4 + 96 * p.done / p.total) + '%'; $('status-text').textContent = p.label + ': ' + p.done + ' of ' + p.total + ' map tiles'; },
+        onProgress: function (p) { if (id !== runId) return; bar.style.width = Math.round(4 + 96 * p.done / p.total) + '%'; status(function () { $('status-text').textContent = t('tilesProgress', { label: I18N.label(p.label), done: p.done, total: p.total }); }); },
         onPartial: function (res) { if (id !== runId) return; store(res); draw(false, true); summary(res, true); }
       });
     }).then(function (o) {
       if (!o || id !== runId) return;
       store(o.results); draw(false, true); summary(o.results, false); prog.hidden = true;
       if (selected !== null) openCard(selected);
-      if (o.failedTiles) toast(o.failedTiles + ' map tiles failed to load. Some names may be less specific.');
+      if (o.failedTiles) toast(t('tilesFailed', { n: o.failedTiles }));
       writeHash();
     }).catch(function (e) {
       if (id !== runId) return;
-      prog.hidden = true; $('status-text').textContent = 'Naming stopped: ' + e.message + '. Check your connection and move the system to try again.';
+      prog.hidden = true; status(function () { $('status-text').textContent = t('namingStopped', { x: e.message }); });
     });
   }
+  function status(fn) { restatus = fn; fn(); }
   function store(res) { names = {}; res.forEach(function (r) { if (r) names[r.id] = r; }); window.MA_NAMES = names; }
   function summary(res, part) {
     var c = { 1: 0, 2: 0, 3: 0 }, fl = 0, un = 0;
     res.forEach(function (r) { if (!r) return; c[r.tier]++; if (r.flag) fl++; if (!r.en) un++; });
-    $('status-text').textContent = res.length + ' stations named' + (part ? ', refining…' : '');
-    var h = '<span title="Matched a real station within 400 m">Existing ' + c[1] + '</span><span title="Generated in the local system\'s style">Local style ' + c[2] + '</span><span title="Generated with the general scheme">General ' + c[3] + '</span>';
-    if (fl) h += '<span class="flag" title="In water or empty land">Flagged ' + fl + '</span>';
-    if (un) h += '<span title="No reliable English source. The local name is shown">No English ' + un + '</span>';
+    restatus = function () { summary(res, part); };
+    $('status-text').textContent = t('named', { n: res.length }) + (part ? t('refining') : '');
+    var h = '<span title="' + esc(t('tip.existing')) + '">' + esc(t('existing', { n: c[1] })) + '</span><span title="' + esc(t('tip.style')) + '">' + esc(t('localStyle', { n: c[2] })) + '</span><span title="' + esc(t('tip.general')) + '">' + esc(t('general', { n: c[3] })) + '</span>';
+    if (fl) h += '<span class="flag" title="' + esc(t('tip.flag')) + '">' + esc(t('flagged', { n: fl })) + '</span>';
+    if (un) h += '<span title="' + esc(t('tip.noEn')) + '">' + esc(t('noEnglish', { n: un })) + '</span>';
     $('tiers').innerHTML = h;
     window.MA_STATS = { c: c, flagged: fl, noEnglish: un, final: !part };
   }
 
   /* ---------- station card ---------- */
-  var KIND = { station: 'Existing station', neighbourhood: 'Neighbourhood', landmark: 'Landmark', road: 'Road', intersection: 'Intersection', direction: 'Direction from a place', nearest: 'Nearest named feature', none: 'Nothing nearby' };
-  var TIER = { 1: 'Existing station match', 2: 'Local system style', 3: 'General scheme' };
   function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
   function openCard(i) {
     selected = i; var d = shown(i), r = d.r, main = S.lang === 'en' ? (d.en || d.local) : d.local, alt = S.lang === 'en' ? d.local : (d.en || '');
     $('card').hidden = false;
-    $('card-title').textContent = main || 'Naming…';
-    $('card-alt').textContent = alt && alt !== main ? alt : (S.lang === 'en' && !d.en ? 'No English source' : '');
+    $('card-title').textContent = main || t('cardNaming');
+    $('card-alt').textContent = alt && alt !== main ? alt : (S.lang === 'en' && !d.en ? t('noEnSource') : '');
     $('card-lines').innerHTML = d.s.l.filter(function (x) { return !S.off[x]; }).map(function (x) { var l = lineById(x); return '<b style="background:' + esc(l.color) + '" title="' + esc(l.name) + '">' + esc(l.ref || l.en || l.name) + '</b>'; }).join('');
-    var how = r.tier ? (r.kind === 'station' ? 'Matched ' + r.src + ' at ' + r.d + ' m' : KIND[r.kind] + ': ' + r.src + (r.d ? ' at ' + r.d + ' m' : '')) : '';
-    var real = d.s.n ? d.s.n + (d.s.e && d.s.e !== d.s.n ? ' (' + d.s.e + ')' : '') : 'No name in source';
-    $('card-why').innerHTML = (r.tier ? '<dt>Rule</dt><dd>' + esc(TIER[r.tier]) + '</dd><dt>Source</dt><dd>' + esc(how) + '</dd>' : '') +
-      (r.enHow === 'transliterated' ? '<dt>English</dt><dd>Transliterated</dd>' : '') +
-      (r.flag ? '<dt>Flag</dt><dd class="flagged">' + (r.flag === 'water' ? 'Station is in water' : 'Empty land, nothing close by') + '</dd>' : '') +
-      (S.renames[i] ? '<dt>Edited</dt><dd>You renamed this station</dd>' : '') +
-      '<dt>Real name</dt><dd>' + esc(real) + ' in ' + esc(sys.name) + '</dd>';
+    var how = r.tier ? (r.kind === 'station' ? t('matched', { src: r.src, d: r.d }) : t('kindSrc', { kind: t('kind.' + r.kind), x: r.d ? t('atM', { x: r.src, d: r.d }) : r.src })) : '';
+    var real = d.s.n ? d.s.n + (d.s.e && d.s.e !== d.s.n ? ' (' + d.s.e + ')' : '') : t('noNameInSource');
+    $('card-why').innerHTML = (r.tier ? '<dt>' + esc(t('rule')) + '</dt><dd>' + esc(t('tier.' + r.tier)) + '</dd><dt>' + esc(t('source')) + '</dt><dd>' + esc(how) + '</dd>' : '') +
+      (r.enHow === 'transliterated' ? '<dt>' + esc(t('english')) + '</dt><dd>' + esc(t('transliterated')) + '</dd>' : '') +
+      (r.flag ? '<dt>' + esc(t('flag')) + '</dt><dd class="flagged">' + esc(t(r.flag === 'water' ? 'inWater' : 'emptyLand')) + '</dd>' : '') +
+      (S.renames[i] ? '<dt>' + esc(t('edited')) + '</dt><dd>' + esc(t('youRenamed')) + '</dd>' : '') +
+      '<dt>' + esc(t('realName')) + '</dt><dd>' + esc(t('realIn', { x: real, sys: I18N.city(catOf(S.id)) })) + '</dd>';
     $('rn-local').value = d.local; $('rn-en').value = d.en;
   }
 
@@ -292,7 +305,7 @@
         relayer();
       });
       var nm = document.createElement('span'); nm.textContent = n.name;
-      var ct = document.createElement('span'); ct.className = 'count'; ct.textContent = n.lines.length + (n.lines.length === 1 ? ' line' : ' lines');
+      var ct = document.createElement('span'); ct.className = 'count'; ct.textContent = t(n.lines.length === 1 ? 'line1' : 'lineN', { n: n.lines.length });
       sm.appendChild(cb); sm.appendChild(nm); sm.appendChild(ct); d.appendChild(sm);
       var wrap = document.createElement('div'); wrap.className = 'lines';
       n.lines.forEach(function (l) {
@@ -308,26 +321,26 @@
   var relayerT;
   function relayer() { prepareRadius(); draw(false, true); clearTimeout(relayerT); relayerT = setTimeout(function () { nameNow(); writeHash(); }, 300); }
   function prepareRadius() { var r = 0; visibleStations().forEach(function (v) { var q = plane.st[v.i]; r = Math.max(r, Math.hypot(q[0], q[1])); }); plane.radius = r || 5000; }
+  function catOf(id) { return catalog.systems.filter(function (x) { return x.id === id; })[0]; }
   function qaOf(id) { return (qaLive[id] || (catalog.qa && catalog.qa[id])) || null; }
   var qaLive = {};
   function setSubtitle() {
-    var c = catalog.systems.filter(function (x) { return x.id === S.id; })[0], q = qaOf(S.id), st = visibleStations().length;
-    var bits = esc(c.local !== c.name ? c.local + ', ' + c.country : c.country) + '. ' + st + ' stations.';
-    if (q && q.status === 'fail') bits += ' <span class="warn-chip">Data check failed: ' + esc(q.issues[0] || '') + '</span>';
-    else if (q && q.status === 'warn') bits += ' <span class="warn-chip">Data warning: ' + esc(q.issues[0] || '') + '</span>';
+    var c = catOf(S.id), q = qaOf(S.id), st = visibleStations().length, country = I18N.country(c.country);
+    var bits = esc(t('subLine', { where: c.local !== I18N.city(c) ? c.local + t('comma') + country : country, n: st }));
+    if (q && q.status === 'fail') bits += ' <span class="warn-chip">' + esc(t('dataFail', { x: I18N.issue(q.issues[0] || '') })) + '</span>';
+    else if (q && q.status === 'warn') bits += ' <span class="warn-chip">' + esc(t('dataWarn', { x: I18N.issue(q.issues[0] || '') })) + '</span>';
     $('sys-sub').innerHTML = bits;
   }
   function selectSystem(id, opts) {
     opts = opts || {};
-    var c = catalog.systems.filter(function (x) { return x.id === id; })[0];
-    $('sys-search').value = c.name;
+    $('sys-search').value = I18N.city(catOf(id));
     return loadSystem(id).then(function (s) {
-      if (!opts.keep) { S.off = {}; S.netOff = {}; S.netOn = {}; S.renames = {}; }
+      if (!opts.keep) { S.off = {}; S.netOff = {}; S.netOn = {}; S.renames = {}; S.piv = [0, 0]; }
       S.id = id; sys = s; names = {}; selected = null; $('card').hidden = true;
-      prepare(); renderLayers(); setSubtitle();
+      armPivot(false); prepare(); renderLayers(); setSubtitle();
       if (!opts.keep) fit();
       draw(false, false); placeHandles(); nameNow(); writeHash();
-    }).catch(function (e) { toast(e.message + '. Try another system.'); });
+    }).catch(function (e) { toast(t('tryAnother', { x: e.message })); });
   }
   function fit() {
     var r = plane.radius * 1.15, n = Geo.inverse(S.target, [0, r]), s = Geo.inverse(S.target, [0, -r]), e = Geo.inverse(S.target, [r, 0]), w = Geo.inverse(S.target, [-r, 0]);
@@ -363,12 +376,12 @@
     });
   }
   function systemSource(q, cb) {
-    q = (q || '').toLowerCase().trim();
+    q = (q || '').toLowerCase().trim().replace(/台/g, '臺');
     var out = [], last = null;
     catalog.systems.slice().sort(function (a, b) { return a.region < b.region ? -1 : a.region > b.region ? 1 : a.name < b.name ? -1 : 1; }).forEach(function (c) {
-      if (q && (c.name + ' ' + c.local + ' ' + c.country).toLowerCase().indexOf(q) < 0) return;
-      if (!q && c.region !== last) { out.push({ group: c.region }); last = c.region; }
-      out.push({ label: c.name, note: c.country, id: c.id });
+      if (q && I18N.searchText(c).indexOf(q) < 0) return;
+      if (!q && c.region !== last) { out.push({ group: I18N.region(c.region) }); last = c.region; }
+      out.push({ label: I18N.city(c), note: I18N.country(c.country), id: c.id });
     });
     cb(out);
   }
@@ -379,12 +392,14 @@
     placeT = setTimeout(function () {
       fetch('https://photon.komoot.io/api/?limit=6&q=' + encodeURIComponent(q)).then(function (r) { return r.json(); }).then(function (j) {
         cb((j.features || []).map(function (f) { var p = f.properties; return { label: p.name || p.city || q, note: [p.city, p.state, p.country].filter(function (x, i, a) { return x && x !== p.name && a.indexOf(x) === i; }).slice(0, 2).join(', '), p: f.geometry.coordinates }; }));
-      }).catch(function () { toast('Place search is not reachable right now. Drag the system on the map instead.'); });
+      }).catch(function () { toast(t('placeDown')); });
     }, 300);
   }
   function moveTo(p) { S.target = p; fit(); draw(false, false); nameNow(); writeHash(); }
   function setRot(v, live) {
-    S.rot = ((Math.round(v) % 360) + 360) % 360; $('rot').value = S.rot; $('rot-n').value = S.rot;
+    var r = ((Math.round(v) % 360) + 360) % 360;
+    if (r !== S.rot && pivOn()) S.target = targetFor(placePt(S.piv), r);
+    S.rot = r; $('rot').value = S.rot; $('rot-n').value = S.rot;
     if (live) draw(true, false); else { draw(false, false); nameNow(); writeHash(); }
   }
   function setLang(l) {
@@ -394,22 +409,45 @@
     writeHash();
   }
 
+  /* ---------- rotation center ---------- */
+  function pivUI() {
+    $('piv-reset').disabled = !pivOn();
+    $('piv-set').textContent = t(pivArm ? 'cancel' : 'setCenter');
+    $('piv-set').setAttribute('aria-pressed', String(pivArm));
+    $('piv-note').textContent = t(pivArm ? 'pivArmed' : pivOn() ? 'pivSet' : 'pivDefault');
+  }
+  function armPivot(on) { pivArm = on; $('map').classList.toggle('pivot-arm', on); pivUI(); }
+  // Only the center moves here. The system stays where it is.
+  function setPivot(lngLat) { S.piv = Geo.rotate(Geo.forward(S.target, lngLat), -S.rot); placeHandles(); pivUI(); }
+  function resetPivot() { S.piv = [0, 0]; armPivot(false); placeHandles(); writeHash(); }
+
   /* ---------- drag and rotate ---------- */
   var dragging = { on: false, moved: false };
   var rafDraw = false;
   function liveDraw() { if (rafDraw) return; rafDraw = true; requestAnimationFrame(function () { rafDraw = false; draw(true, false); }); }
   function setupHandles() {
-    var c = document.createElement('div'); c.className = 'handle'; c.title = 'Drag to move the system'; c.setAttribute('aria-label', 'Move handle');
-    var r = document.createElement('div'); r.className = 'handle rot'; r.textContent = '↻'; r.title = 'Drag to rotate the system'; r.setAttribute('aria-label', 'Rotate handle');
+    var c = document.createElement('div'); c.className = 'handle';
+    var r = document.createElement('div'); r.className = 'handle rot'; r.textContent = '↻';
+    var p = document.createElement('div'); p.className = 'handle piv';
     handles.center = new maplibregl.Marker({ element: c, draggable: true }).setLngLat(S.target).addTo(map);
     handles.rot = new maplibregl.Marker({ element: r, draggable: true }).setLngLat(S.target).addTo(map);
+    handles.piv = new maplibregl.Marker({ element: p, draggable: true }).setLngLat(S.target).addTo(map);
+    handleText();
     handles.center.on('drag', function () { var q = handles.center.getLngLat(); S.target = [q.lng, q.lat]; liveDraw(); });
     handles.center.on('dragend', function () { var q = handles.center.getLngLat(); S.target = [q.lng, q.lat]; draw(false, false); nameNow(); writeHash(); });
-    handles.rot.on('drag', function () { var q = handles.rot.getLngLat(); setRot(Geo.bearing(S.target, [q.lng, q.lat]), true); });
+    handles.rot.on('drag', function () { var q = handles.rot.getLngLat(); setRot(Geo.bearing(placePt(S.piv), [q.lng, q.lat]), true); });
     handles.rot.on('dragend', function () { setRot(S.rot, false); });
+    handles.piv.on('drag', function () { var q = handles.piv.getLngLat(); setPivot([q.lng, q.lat]); });
+    handles.piv.on('dragend', writeHash);
+    // Cleared after this click so a station under the pointer does not also open its card.
+    map.on('click', function (e) {
+      if (!pivArm) return;
+      setPivot([e.lngLat.lng, e.lngLat.lat]); writeHash();
+      setTimeout(function () { armPivot(false); }, 0);
+    });
     // Grab the lines directly.
     function start(e) {
-      if (e.originalEvent.touches && e.originalEvent.touches.length > 1) return;
+      if (pivArm || (e.originalEvent.touches && e.originalEvent.touches.length > 1)) return;
       e.preventDefault(); dragging.on = true; dragging.moved = false;
       var st = map.project(S.target), off = [st.x - e.point.x, st.y - e.point.y];
       function mv(ev) {
@@ -428,31 +466,39 @@
     map.on('touchstart', 'ma-hit', start);
   }
 
+  function handleText() {
+    if (!handles.center) return;
+    [[handles.center, 'moveHandle', 'moveAria'], [handles.rot, 'rotHandle', 'rotAria'], [handles.piv, 'pivHandle', 'pivAria']].forEach(function (h) {
+      var el = h[0].getElement(); el.title = t(h[1]); el.setAttribute('aria-label', t(h[2]));
+    });
+  }
+
   /* ---------- export ---------- */
+  var PNG_FONT = '"Overpass", Arial, "Noto Sans CJK TC", "PingFang TC", "Microsoft JhengHei", sans-serif';
   function savePng() {
     map.once('render', function () {
       var g = map.getCanvas(), out = document.createElement('canvas'), ratio = g.width / g.clientWidth;
       out.width = g.width; out.height = g.height + Math.round(34 * ratio);
       var x = out.getContext('2d'); x.fillStyle = '#14306b'; x.fillRect(0, 0, out.width, out.height);
       x.drawImage(g, 0, 0);
-      x.fillStyle = '#ffffff'; x.font = '700 ' + Math.round(14 * ratio) + 'px "Overpass", Arial, sans-serif'; x.textBaseline = 'middle';
+      x.fillStyle = '#ffffff'; x.font = '700 ' + Math.round(14 * ratio) + 'px ' + PNG_FONT; x.textBaseline = 'middle';
       var y = g.height + 17 * ratio;
-      x.fillText('Metro Anywhere: ' + sys.name + ' at true scale', 10 * ratio, y);
-      x.font = Math.round(11 * ratio) + 'px "Overpass", Arial, sans-serif'; x.textAlign = 'right';
+      x.fillText(t('pngTitle', { name: I18N.city(catOf(S.id)) }), 10 * ratio, y);
+      x.font = Math.round(11 * ratio) + 'px ' + PNG_FONT; x.textAlign = 'right';
       x.fillText('© OpenStreetMap contributors, OpenFreeMap, OpenMapTiles', out.width - 10 * ratio, y);
       out.toBlob(function (b) {
         var a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'metro-anywhere-' + S.id + '.png';
         document.body.appendChild(a); a.click(); a.remove();
         setTimeout(function () { URL.revokeObjectURL(a.href); }, 3000);
-        toast('Saved PNG');
+        toast(t('savedPng'));
       });
     });
     map.triggerRepaint();
   }
   function copyLink() {
     writeHash(); var u = location.href;
-    var fb = function () { var t = $('sys-sub'); toast('Copy this link from the address bar.'); };
-    if (navigator.clipboard) navigator.clipboard.writeText(u).then(function () { toast('Link copied'); }).catch(fb); else fb();
+    var fb = function () { toast(t('copyFallback')); };
+    if (navigator.clipboard) navigator.clipboard.writeText(u).then(function () { toast(t('linkCopied')); }).catch(fb); else fb();
   }
 
   /* ---------- QA ---------- */
@@ -461,18 +507,18 @@
     catalog.systems.forEach(function (s) {
       var q = qaOf(s.id), st = q ? q.status : 'none'; c[st]++;
       var tr = document.createElement('tr');
-      tr.innerHTML = '<td>' + esc(s.name) + '</td><td><span class="pill ' + st + '">' + ({ pass: 'Pass', warn: 'Warn', fail: 'Fail', none: 'Not run' })[st] + '</span></td><td class="n">' + (q ? q.stations + (q.expected ? ' / ' + q.expected : '') : '') + '</td><td class="n">' + (q ? q.lines + (q.expectedLines ? ' / ' + q.expectedLines : '') : '') + '</td><td>' + esc(q ? q.issues.join('. ') : '') + '</td>';
+      tr.innerHTML = '<td>' + esc(I18N.city(s)) + '</td><td><span class="pill ' + st + '">' + esc(t('qa.' + st)) + '</span></td><td class="n">' + (q ? q.stations + (q.expected ? ' / ' + q.expected : '') : '') + '</td><td class="n">' + (q ? q.lines + (q.expectedLines ? ' / ' + q.expectedLines : '') : '') + '</td><td>' + esc(q ? q.issues.map(I18N.issue).join(t('issueSep')) : '') + '</td>';
       tr.style.cursor = 'pointer'; tr.addEventListener('click', function () { $('qa').close(); selectSystem(s.id); });
       body.appendChild(tr);
     });
-    $('qa-sum').textContent = c.pass + ' pass, ' + c.warn + ' warn, ' + c.fail + ' fail, ' + c.none + ' not run. ' + (qaRan ? 'Checked in this browser just now.' : 'Build checks from ' + catalog.built + '. Station counts compare against published figures.');
+    $('qa-sum').textContent = t('qaSum', c) + (qaRan ? t('qaRan') : t('qaBuilt', { d: catalog.built }));
   }
   var qaRan = false;
   function runQA() {
     var list = catalog.systems.slice(), i = 0, btn = $('qa-run'); btn.disabled = true;
     (function next() {
-      if (i >= list.length) { btn.disabled = false; btn.textContent = 'Run all'; qaRan = true; renderQA(); setSubtitle(); return; }
-      var c = list[i++]; btn.textContent = 'Checking ' + i + ' of ' + list.length;
+      if (i >= list.length) { btn.disabled = false; btn.textContent = t('runAll'); qaRan = true; renderQA(); setSubtitle(); return; }
+      var c = list[i++]; btn.textContent = t('qaChecking', { i: i, n: list.length });
       loadSystem(c.id).then(function (s) { qaLive[c.id] = QA.check(s, c); }).catch(function () { qaLive[c.id] = { status: 'fail', stations: 0, lines: 0, issues: ['Data file did not load'] }; }).then(function () { renderQA(); setTimeout(next, 30); });
     })();
   }
@@ -481,8 +527,38 @@
   function dark() { return S.theme ? S.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; }
   function applyTheme(init) {
     if (S.theme) document.documentElement.setAttribute('data-theme', S.theme);
-    $('theme').textContent = dark() ? 'Light map' : 'Dark map';
+    $('theme').textContent = t(dark() ? 'lightMap' : 'darkMap');
     if (!init) { styleReady = false; map.setStyle(dark() ? STYLE.dark : STYLE.light); }
+  }
+
+  /* ---------- interface language ---------- */
+  function fillStyles() {
+    var sel = $('style-sel'); sel.innerHTML = '';
+    var add = function (v, label) { var o = document.createElement('option'); o.value = v; o.textContent = label; sel.appendChild(o); };
+    add('auto', t('styleAuto')); add('general', t('styleGeneral'));
+    catalog.systems.slice().sort(function (a, b) { return a.name < b.name ? -1 : 1; }).forEach(function (c) { add(c.id, t('styleOf', { name: I18N.city(c) })); });
+    sel.value = S.style;
+  }
+  function styleNote() {
+    var p = S.style === 'auto' ? null : S.style === 'general' ? Profiles.general : Profiles.byId[S.style], ex = catalog.examples && catalog.examples[S.style];
+    $('style-note').textContent = p ? I18N.note(p.note) + (ex && ex.length ? t('realEx', { x: ex.join(t('listSep')) }) : '') : t('styleAutoNote');
+  }
+  function applyUI() {
+    I18N.apply(document);
+    var b = $('ui-lang'); b.textContent = t('switchLang'); b.setAttribute('aria-label', t('switchLangAria')); b.lang = I18N.zh() ? 'en' : 'zh-Hant';
+    $('collapse').textContent = t($('panel').classList.contains('closed') ? 'show' : 'hide');
+    $('theme').textContent = t(dark() ? 'lightMap' : 'darkMap');
+    $('rot-n').setAttribute('aria-label', t('rotationAria'));
+    fillStyles(); styleNote(); pivUI(); handleText();
+    if (restatus) restatus();
+    if (sys) {
+      var open = [].map.call($('layers').querySelectorAll('details'), function (d) { return d.open; });
+      renderLayers(); setSubtitle();
+      [].forEach.call($('layers').querySelectorAll('details'), function (d, i) { d.open = !!open[i]; });
+      $('sys-search').value = I18N.city(catOf(S.id));
+    }
+    if (selected !== null) openCard(selected);
+    if ($('qa').open) renderQA();
   }
 
   /* ---------- boot ---------- */
@@ -524,32 +600,29 @@
       e.preventDefault(); var l = $('rn-local').value.trim(), n = $('rn-en').value.trim(), r = names[selected] || {};
       var o = {}; if (l && l !== r.local) o.l = l; if (n && n !== r.en) o.e = n;
       if (o.l || o.e) S.renames[selected] = o; else delete S.renames[selected];
-      draw(false, true); openCard(selected); writeHash(); toast('Name saved');
+      draw(false, true); openCard(selected); writeHash(); toast(t('nameSaved'));
     });
     $('rn-reset').addEventListener('click', function () { delete S.renames[selected]; draw(false, true); openCard(selected); writeHash(); });
-    $('collapse').addEventListener('click', function () { var c = $('panel').classList.toggle('closed'); this.textContent = c ? 'Show' : 'Hide'; this.setAttribute('aria-expanded', String(!c)); });
-    var sel = $('style-sel'), o0 = document.createElement('option'); o0.value = 'auto'; o0.textContent = 'Auto, from the location'; sel.appendChild(o0);
-    var og = document.createElement('option'); og.value = 'general'; og.textContent = 'General scheme'; sel.appendChild(og);
-    catalog.systems.slice().sort(function (a, b) { return a.name < b.name ? -1 : 1; }).forEach(function (c) { var o = document.createElement('option'); o.value = c.id; o.textContent = c.name + ' style'; sel.appendChild(o); });
-    sel.value = S.style;
-    function styleNote() {
-      var p = S.style === 'auto' ? null : S.style === 'general' ? Profiles.general : Profiles.byId[S.style], ex = catalog.examples && catalog.examples[S.style];
-      $('style-note').textContent = p ? p.note + (ex && ex.length ? '. Real examples: ' + ex.join(', ') : '') : 'Uses the local system within 5 km of its network, and the general scheme elsewhere.';
-    }
+    $('collapse').addEventListener('click', function () { var c = $('panel').classList.toggle('closed'); this.textContent = t(c ? 'show' : 'hide'); this.setAttribute('aria-expanded', String(!c)); });
+    var sel = $('style-sel');
     sel.addEventListener('change', function () { S.style = sel.value; styleNote(); nameNow(); writeHash(); });
-    styleNote();
+    $('piv-set').addEventListener('click', function () { armPivot(!pivArm); });
+    $('piv-reset').addEventListener('click', resetPivot);
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && pivArm) armPivot(false); });
+    $('ui-lang').addEventListener('click', function () { I18N.set(I18N.zh() ? 'en' : 'zh'); applyUI(); });
     applyTheme(true);
+    applyUI();
     setRot(S.rot, true);
     map.on('load', function () {
       loadSystem(S.id).then(function (s) {
         sys = s; prepare(); setupHandles(); setLang(S.lang);
-        $('sys-search').value = catalog.systems.filter(function (x) { return x.id === S.id; })[0].name;
+        $('sys-search').value = I18N.city(catOf(S.id));
         renderLayers(); setSubtitle();
         if (!hasHash || !S.zoom) fit();
         draw(false, false); nameNow();
       }).catch(function (e) { toast(e.message); });
     });
-    window.MA_S = S; window.MA_API = { selectSystem: selectSystem, moveTo: moveTo, setRot: setRot, setLang: setLang, visibleStations: visibleStations, plane: function () { return plane; }, sys: function () { return sys; }, placePt: placePt };
+    window.MA_S = S; window.MA_API = { selectSystem: selectSystem, moveTo: moveTo, setRot: setRot, setLang: setLang, visibleStations: visibleStations, plane: function () { return plane; }, sys: function () { return sys; }, placePt: placePt, setPivot: setPivot };
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
 })();
