@@ -10,7 +10,7 @@
   window.MA = { sys: function (s) { systems[s.id] = s; if (pending[s.id]) pending[s.id](s); } };
 
   var S = { id: 'tokyo', target: [121.5305, 25.0375], rot: 0, piv: [0, 0], opacity: 100, lang: 'local', style: 'auto', off: {}, netOff: {}, netOn: {}, renames: {}, zoom: null, theme: null };
-  var map, sys, plane = null, tileCache = new Map(), tileBase = null, runId = 0, names = {}, selected = null, handles = {}, styleReady = false, cc = null, ccFor = null, pivArm = false, restatus = null;
+  var map, sys, plane = null, tileCache = new Map(), tileBase = null, runId = 0, names = {}, selected = null, handles = {}, styleReady = false, cc = null, ccFor = null, pivArm = false, restatus = null, nameT = null, held = false;
 
   function toast(m) { var t = $('toast'); t.textContent = m; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(function () { t.hidden = true; }, 3500); }
 
@@ -229,6 +229,7 @@
     }).catch(function () { return null; });
   }
   function nameNow() {
+    held = false;
     var id = ++runId, list = visibleStations();
     var st = list.map(function (v) { var p = placePt(plane.st[v.i]); return { id: v.i, p: p, host: hostFor(p) }; });
     var bar = $('prog-bar'), prog = $('prog');
@@ -244,12 +245,11 @@
       return Naming.run({
         stations: st, lang: lang, cache: tileCache, fetchTile: fetchTile, general: Profiles.general,
         getProfile: function (h) { return Profiles.byId[h] || null; }, getBudget: function (h) { return catalog.budget && catalog.budget[h]; }, isCancelled: function () { return id !== runId; },
-        onProgress: function (p) { if (id !== runId) return; bar.style.width = Math.round(4 + 96 * p.done / p.total) + '%'; status(function () { $('status-text').textContent = t('tilesProgress', { label: I18N.label(p.label), done: p.done, total: p.total }); }); },
-        onPartial: function (res) { if (id !== runId) return; store(res); draw(false, true); summary(res, true); }
+        onProgress: function (p) { if (id !== runId) return; bar.style.width = Math.round(4 + 96 * p.done / p.total) + '%'; status(function () { $('status-text').textContent = t('tilesProgress', { label: I18N.label(p.label), done: p.done, total: p.total }); }); }
       });
     }).then(function (o) {
       if (!o || id !== runId) return;
-      store(o.results); draw(false, true); summary(o.results, false); prog.hidden = true;
+      store(o.results); draw(false, true); summary(o.results); prog.hidden = true;
       if (selected !== null) openCard(selected);
       if (o.failedTiles) toast(t('tilesFailed', { n: o.failedTiles }));
       writeHash();
@@ -258,18 +258,27 @@
       prog.hidden = true; status(function () { $('status-text').textContent = t('namingStopped', { x: e.message }); });
     });
   }
+  // Naming is heavy, so it stops while the system moves and starts once, a few seconds after the last change.
+  var NAME_WAIT = 3000;
+  function holdNames() {
+    clearTimeout(nameT);
+    if (held) return;
+    held = true; runId++; $('prog').hidden = true; $('tiers').innerHTML = '';
+    status(function () { $('status-text').innerHTML = '<span class="hourglass" aria-hidden="true">⏳</span> ' + esc(t('namingWait')); });
+  }
+  function queueNames() { holdNames(); nameT = setTimeout(nameNow, NAME_WAIT); }
   function status(fn) { restatus = fn; fn(); }
   function store(res) { names = {}; res.forEach(function (r) { if (r) names[r.id] = r; }); window.MA_NAMES = names; }
-  function summary(res, part) {
+  function summary(res) {
     var c = { 1: 0, 2: 0, 3: 0 }, fl = 0, un = 0;
     res.forEach(function (r) { if (!r) return; c[r.tier]++; if (r.flag) fl++; if (!r.en) un++; });
-    restatus = function () { summary(res, part); };
-    $('status-text').textContent = t('named', { n: res.length }) + (part ? t('refining') : '');
+    restatus = function () { summary(res); };
+    $('status-text').textContent = t('named', { n: res.length });
     var h = '<span title="' + esc(t('tip.existing')) + '">' + esc(t('existing', { n: c[1] })) + '</span><span title="' + esc(t('tip.style')) + '">' + esc(t('localStyle', { n: c[2] })) + '</span><span title="' + esc(t('tip.general')) + '">' + esc(t('general', { n: c[3] })) + '</span>';
     if (fl) h += '<span class="flag" title="' + esc(t('tip.flag')) + '">' + esc(t('flagged', { n: fl })) + '</span>';
     if (un) h += '<span title="' + esc(t('tip.noEn')) + '">' + esc(t('noEnglish', { n: un })) + '</span>';
     $('tiers').innerHTML = h;
-    window.MA_STATS = { c: c, flagged: fl, noEnglish: un, final: !part };
+    window.MA_STATS = { c: c, flagged: fl, noEnglish: un, final: true };
   }
 
   /* ---------- station card ---------- */
@@ -318,8 +327,7 @@
       d.appendChild(wrap); box.appendChild(d);
     });
   }
-  var relayerT;
-  function relayer() { prepareRadius(); draw(false, true); clearTimeout(relayerT); relayerT = setTimeout(function () { nameNow(); writeHash(); }, 300); }
+  function relayer() { prepareRadius(); draw(false, true); queueNames(); writeHash(); }
   function prepareRadius() { var r = 0; visibleStations().forEach(function (v) { var q = plane.st[v.i]; r = Math.max(r, Math.hypot(q[0], q[1])); }); plane.radius = r || 5000; }
   function catOf(id) { return catalog.systems.filter(function (x) { return x.id === id; })[0]; }
   function qaOf(id) { return (qaLive[id] || (catalog.qa && catalog.qa[id])) || null; }
@@ -339,7 +347,7 @@
       S.id = id; sys = s; names = {}; selected = null; $('card').hidden = true;
       armPivot(false); prepare(); renderLayers(); setSubtitle();
       if (!opts.keep) fit();
-      draw(false, false); placeHandles(); nameNow(); writeHash();
+      draw(false, false); placeHandles(); queueNames(); writeHash();
     }).catch(function (e) { toast(t('tryAnother', { x: e.message })); });
   }
   function fit() {
@@ -395,12 +403,12 @@
       }).catch(function () { toast(t('placeDown')); });
     }, 300);
   }
-  function moveTo(p) { S.target = p; fit(); draw(false, false); nameNow(); writeHash(); }
+  function moveTo(p) { S.target = p; fit(); draw(false, false); queueNames(); writeHash(); }
   function setRot(v, live) {
     var r = ((Math.round(v) % 360) + 360) % 360;
     if (r !== S.rot && pivOn()) S.target = targetFor(placePt(S.piv), r);
     S.rot = r; $('rot').value = S.rot; $('rot-n').value = S.rot;
-    if (live) draw(true, false); else { draw(false, false); nameNow(); writeHash(); }
+    if (live) { if (sys) holdNames(); draw(true, false); } else { draw(false, false); queueNames(); writeHash(); }
   }
   function setLang(l) {
     S.lang = l; $('lang-local').setAttribute('aria-pressed', l === 'local'); $('lang-en').setAttribute('aria-pressed', l === 'en');
@@ -424,7 +432,7 @@
   /* ---------- drag and rotate ---------- */
   var dragging = { on: false, moved: false };
   var rafDraw = false;
-  function liveDraw() { if (rafDraw) return; rafDraw = true; requestAnimationFrame(function () { rafDraw = false; draw(true, false); }); }
+  function liveDraw() { holdNames(); if (rafDraw) return; rafDraw = true; requestAnimationFrame(function () { rafDraw = false; draw(true, false); }); }
   function setupHandles() {
     var c = document.createElement('div'); c.className = 'handle';
     var r = document.createElement('div'); r.className = 'handle rot'; r.textContent = '↻';
@@ -434,7 +442,7 @@
     handles.piv = new maplibregl.Marker({ element: p, draggable: true }).setLngLat(S.target).addTo(map);
     handleText();
     handles.center.on('drag', function () { var q = handles.center.getLngLat(); S.target = [q.lng, q.lat]; liveDraw(); });
-    handles.center.on('dragend', function () { var q = handles.center.getLngLat(); S.target = [q.lng, q.lat]; draw(false, false); nameNow(); writeHash(); });
+    handles.center.on('dragend', function () { var q = handles.center.getLngLat(); S.target = [q.lng, q.lat]; draw(false, false); queueNames(); writeHash(); });
     handles.rot.on('drag', function () { var q = handles.rot.getLngLat(); setRot(Geo.bearing(placePt(S.piv), [q.lng, q.lat]), true); });
     handles.rot.on('dragend', function () { setRot(S.rot, false); });
     handles.piv.on('drag', function () { var q = handles.piv.getLngLat(); setPivot([q.lng, q.lat]); });
@@ -457,7 +465,7 @@
       function up() {
         map.off('mousemove', mv); map.off('touchmove', mv); map.off('mouseup', up); map.off('touchend', up);
         dragging.on = false;
-        if (dragging.moved) { draw(false, false); nameNow(); writeHash(); }
+        if (dragging.moved) { draw(false, false); queueNames(); writeHash(); }
         setTimeout(function () { dragging.moved = false; }, 0);
       }
       map.on('mousemove', mv); map.on('touchmove', mv); map.once('mouseup', up); map.once('touchend', up);
@@ -605,7 +613,7 @@
     $('rn-reset').addEventListener('click', function () { delete S.renames[selected]; draw(false, true); openCard(selected); writeHash(); });
     $('collapse').addEventListener('click', function () { var c = $('panel').classList.toggle('closed'); this.textContent = t(c ? 'show' : 'hide'); this.setAttribute('aria-expanded', String(!c)); });
     var sel = $('style-sel');
-    sel.addEventListener('change', function () { S.style = sel.value; styleNote(); nameNow(); writeHash(); });
+    sel.addEventListener('change', function () { S.style = sel.value; styleNote(); queueNames(); writeHash(); });
     $('piv-set').addEventListener('click', function () { armPivot(!pivArm); });
     $('piv-reset').addEventListener('click', resetPivot);
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && pivArm) armPivot(false); });

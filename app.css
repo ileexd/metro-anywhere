@@ -59,6 +59,9 @@ button.ghost { background: transparent; }
 .prog { height: 5px; background: var(--rule); }
 .prog i { display: block; height: 100%; width: 0; background: var(--sign); transition: width .15s; }
 :root[data-theme="dark"] .prog i { background: var(--edge); }
+.hourglass { display: inline-block; animation: hourglass-flip 1.6s ease-in-out infinite; }
+@keyframes hourglass-flip { 0%, 60% { transform: rotate(0); } 100% { transform: rotate(180deg); } }
+@media (prefers-reduced-motion: reduce) { .hourglass { animation: none; } }
 .tiers { display: flex; flex-wrap: wrap; gap: 4px; }
 .tiers span { font: 600 11.5px/1 var(--mono); border: 1px solid var(--rule); padding: 3px 5px; font-variant-numeric: tabular-nums; }
 .tiers span.flag { border-color: var(--warn); color: var(--warn); }
